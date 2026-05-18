@@ -1,0 +1,12 @@
+{
+  "name": "bglg-relay",
+  "version": "0.1.0",
+  "private": true,
+  "main": "bglg-relay-server.js",
+  "scripts": {
+    "start": "node bglg-relay-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
