@@ -1,9 +1,10 @@
-# Big Guy Little Guys — Architecture Maintenance Guide v0.1
+[big-guy-little-guys-architecture-maintenance-v0.2.md](https://github.com/user-attachments/files/27963283/big-guy-little-guys-architecture-maintenance-v0.2.md)
+# Big Guy Little Guys — Architecture Maintenance Guide v0.2
 
 **Project:** Big Guy Little Guys  
 **Guide date:** 2026-05-18  
-**Current reference build:** `big-guy-little-guys-shared-v0.7.html`  
-**Purpose:** Preserve the shared-simulation, two-role, GitHub Pages multiplayer architecture while the game changes through many future playtest patches.
+**Current reference build:** `big-guy-little-guys-shared-v0.8.html`  
+**Purpose:** Preserve the shared-simulation, two-role, GitHub Pages multiplayer architecture while the game changes through many future playtest patches. This guide is intentionally durable: do not update it for routine balance, content, UI, or small feature patches. Update it only when the architecture, multiplayer model, body-system model, command model, or documentation philosophy changes radically.
 
 ---
 
@@ -34,6 +35,22 @@ role-specific views
 commands as the only gameplay mutation path
 clients send intent and render snapshots
 ```
+
+## Documentation Update Policy
+
+This file is not a patch log.
+
+Do not version-bump this architecture guide for every gameplay change. It should remain the source of truth across many patches. Update it only when one of these changes:
+
+- the shared-simulation model changes
+- the host-authoritative multiplayer model changes
+- the command/validation model changes
+- the snapshot/hydration model changes
+- the canonical body systems change
+- the project intentionally moves away from static GitHub Pages / single-file prototype delivery
+- a repeated failure pattern proves the guide needs a new rule
+
+Routine work should cite this guide, not rewrite it.
 
 ---
 
@@ -85,7 +102,7 @@ join browser renders host snapshots
 
 The non-host client must not run combat, enemy, projectile, repair, resource, or upgrade simulation.
 
-The current v0.7 multiplayer bug fix depends on this rule. Do not undo it.
+The stable v0.8 multiplayer baseline depends on this rule. Do not undo it.
 
 Expected structure:
 
@@ -122,6 +139,19 @@ dispatch({
 ```
 
 For remote clients, commands must be sendable over the network.
+
+Stable v0.8 adds a command registry / validation layer. New gameplay commands should be registered with their intended permissions before being wired into UI, AI, networking, or debug tools.
+
+Each command should declare, directly or implicitly:
+
+```text
+what role may send it
+whether it can run during upgrade pause
+whether a remote client may send it
+whether it is debug-only
+```
+
+Do not bypass command validation to make a quick feature work.
 
 ---
 
@@ -180,6 +210,8 @@ Avoid storing these directly in shared state:
 
 If a feature needs temporary visual-only state, put it in view/UI state and ensure snapshots can safely omit or reconstruct it.
 
+Stable v0.8 includes a snapshot-safety check before broadcast. Treat warnings from that check as architecture warnings, not cosmetic console noise.
+
 ---
 
 ## Rule 7 — GitHub Pages Is a First-Class Target
@@ -189,6 +221,60 @@ The game is expected to work when hosted as a static HTML file on GitHub Pages.
 Current online multiplayer path uses browser-side PeerJS/WebRTC behavior from the single HTML file. Do not add a requirement for a Node server unless the project explicitly moves to a deployed backend.
 
 If a future change needs a backend, document it clearly before coding.
+
+---
+
+## Rule 8 — Network-Visible Session Events
+
+Session-critical presentation must be visible to both browsers in online play.
+
+Examples:
+
+```text
+role coin flips
+upgrade vote coin flips
+start countdown
+lobby/back/leave state
+```
+
+Do not trigger these only with a host-local callback. The host may decide the result, but both browsers should receive enough session/UI event data to show the same beat before the result is applied.
+
+Good pattern:
+
+```text
+host decides coin result
+host sends coin event to client
+both browsers show coin overlay
+host applies result after the visual beat
+host broadcasts final snapshot
+```
+
+Bad pattern:
+
+```text
+host flips coin locally
+host immediately applies result
+client only receives final state
+```
+
+---
+
+## Rule 9 — Working Stability Beats Premature Infrastructure
+
+The single-file prototype is allowed to stay single-file while the game is still moving quickly.
+
+Do not add a framework, bundler, backend, TypeScript migration, replay engine, or multi-file architecture solely for future-proofing. Add infrastructure only when it solves a present recurring problem without destabilizing the build.
+
+The preferred future-proofing style is:
+
+```text
+small guardrails
+clear commands
+serializable state
+smoke checks
+versioned stable files
+hosted multiplayer testing
+```
 
 ---
 
@@ -211,8 +297,8 @@ Recommended order:
 9. AI controllers
 10. Big Guy view/input
 11. Little Guys view/input
-12. minimaps / overlays / coin flip
-13. debug tools
+12. minimaps / overlays / countdown / coin flip
+13. debug tools / smoke checks / command log
 14. main loop
 ```
 
@@ -271,6 +357,20 @@ AI should also use commands whenever it changes gameplay state.
 
 Debug controls should use commands too.
 
+New commands must be added to the command registry / validation layer. A command that is not registered should be treated as invalid rather than silently accepted.
+
+When adding a command, check:
+
+```text
+role permission
+pause/upgrade permission
+remote-client permission
+debug-only status
+network payload shape
+host handling path
+client rendering consequence
+```
+
 ---
 
 # 5. Multiplayer-Safe Update Rules
@@ -284,7 +384,9 @@ The host may:
 - update workers and repair
 - resolve upgrade votes
 - resolve role coin flips
+- start network-visible countdowns/coin flips
 - apply commands from both players
+- run snapshot-safety checks before broadcast
 - broadcast snapshots
 
 ## Client
@@ -296,6 +398,7 @@ The non-host client may:
 - receive snapshots
 - render latest snapshot
 - show local UI state needed for input
+- show network-visible session events such as countdowns and coin flips
 
 The client must not:
 
@@ -308,6 +411,7 @@ The client must not:
 - generate upgrades
 - advance boss timers
 - apply resource pickups
+- decide or apply coin-flip results independently
 
 ---
 
@@ -320,6 +424,7 @@ Feature:
 Why:
 Shared state changes:
 Command changes:
+Command registry / validation changes:
 Selector/output changes:
 Simulation changes:
 Big Guy experience:
@@ -327,6 +432,7 @@ Little Guys experience:
 Solo behavior:
 Multiplayer behavior:
 Snapshot/network risk:
+Network-visible session events:
 GitHub Pages risk:
 UI changes:
 AI changes:
@@ -430,6 +536,7 @@ After every update, check these at minimum.
 - Are all body systems using `heart`, `meleeArm`, `reactor`, `rangedArm`, `legs`?
 - Did any old `leftArm`, `rightArm`, or gameplay `head` language return?
 - Are new gameplay changes made through commands?
+- Are new commands registered and permissioned?
 
 ## Big Guy side
 
@@ -452,12 +559,12 @@ After every update, check these at minimum.
 - Does solo require only the human vote?
 - Does two-player require both role votes?
 - Do same-choice votes apply directly?
-- Do different-choice votes show the coin flip and apply the result?
+- Do different-choice votes show the coin flip on both online browsers and apply the result after the visual beat?
 - Do vote badges show `YOU`, `NOT YOU`, or `YOU + NOT YOU` correctly?
 
 ## Solo
 
-- Solo starts as Big Guy.
+- Solo starts with countdown, then Big Guy is playable.
 - Inactive side AI works.
 - Minimap role switching works in solo only.
 
@@ -467,16 +574,21 @@ After every update, check these at minimum.
 - Join enters 4-digit PIN and connects.
 - Role select appears only after connection.
 - Both players can choose roles.
-- Same-role choice coin flip works.
+- Back buttons work from host/join/role-select before play starts.
+- Same-role choice coin flip works and is visible on both browsers.
+- Start countdown appears before gameplay.
 - Host starts and runs simulation.
 - Client sends input/commands and renders snapshots.
 - Client does not simulate independently.
 - Upgrade voting syncs.
+- Upgrade disagreement coin flip is visible on both browsers.
 
 ## GitHub Pages
 
 - Hosted page loads from static HTML.
 - Host/join works from two browser windows.
+- Smoke test passes in the debug panel.
+- Snapshot warnings are understood and addressed.
 - No required backend unless explicitly intended.
 
 ---
@@ -550,7 +662,29 @@ Convert the mutation to a command handled by the authoritative simulation.
 
 ---
 
-## Failure Pattern D — Non-serializable state
+## Failure Pattern D — Host-only session presentation
+
+Symptom:
+
+```text
+The host sees a coin flip, countdown, or lobby transition, but the joiner jumps straight to the result or appears frozen.
+```
+
+Cause:
+
+```text
+A session-critical visual beat was implemented as a host-local callback instead of a network-visible session event.
+```
+
+Fix:
+
+```text
+Let the host decide the result, broadcast the visual event, show it on both browsers, then apply/broadcast the final state.
+```
+
+---
+
+## Failure Pattern E — Non-serializable state
 
 Symptom:
 
@@ -651,15 +785,21 @@ Detailed explanation belongs in MD files, not in the game UI.
 
 ---
 
-# 13. Versioning Practice
+# 13. Versioning and Documentation Practice
 
 For stable playtest builds:
 
-- increment the filename: `big-guy-little-guys-shared-v0.8.html`
-- update the HTML title/version label
+- increment the filename: `big-guy-little-guys-shared-v0.8.html`, `v0.9`, etc.
+- update the HTML title/version label from a single build-version constant when possible
 - keep prior stable files
 - summarize changes in a patch log or chat response
 - do not overwrite the last stable multiplayer build until the new one is tested
+
+For MD files:
+
+- do not update this architecture guide for every routine gameplay patch
+- do not update the GDD snapshot for every balance/content tweak
+- update docs only when the architecture, core body model, multiplayer flow, or prototype identity changes enough that future work would be misled by the old docs
 
 ---
 
@@ -670,10 +810,11 @@ Use this as the mental checklist before every patch:
 ```text
 One shared state.
 Host simulates.
-Clients send commands and render snapshots.
+Clients send validated commands and render snapshots.
 Views do not own rules.
 Solo is not a fork.
 State must serialize.
+Session-critical visual events must be network-visible.
 Both roles must feel the change.
 GitHub Pages multiplayer must keep working.
 ```
