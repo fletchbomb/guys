@@ -1,9 +1,10 @@
-# Big Guy Little Guys — Project Handoff GDD / Technical Source of Truth v0.7
+[big-guy-little-guys-handoff-v0.8.md](https://github.com/user-attachments/files/27963274/big-guy-little-guys-handoff-v0.8.md)
+# Big Guy Little Guys — Prototype Snapshot GDD / Technical Source of Truth v0.8
 
 **Project:** Big Guy Little Guys  
 **Current handoff date:** 2026-05-18  
-**Current playable reference:** `big-guy-little-guys-shared-v0.7.html`  
-**Purpose:** Current game-design and technical source of truth for continuing the project from the stable multiplayer build.
+**Current playable reference:** `big-guy-little-guys-shared-v0.8.html`  
+**Purpose:** Snapshot of the current stable prototype and its major game-design/technical assumptions. This file is not intended to be updated for every routine patch. It should remain useful until the game changes radically enough that this snapshot would mislead future work.
 
 ---
 
@@ -16,17 +17,46 @@ Big Guy Little Guys is now a single-file browser prototype with:
 - Little Guys body-management gameplay
 - solo play with inactive-side AI
 - browser-to-browser multiplayer through GitHub Pages using PIN host/join flow
+- host/join/role back buttons before play starts
 - role selection with coin flip if both players choose the same role
+- start countdown before gameplay begins
 - paused shared MOD upgrade voting
+- network-visible role and upgrade coin flips
+- command validation / command registry guardrails
+- snapshot-safety checks, command log, and smoke test debug tools
 - host-authoritative online simulation
 
 The current stable build is:
 
 ```text
-big-guy-little-guys-shared-v0.7.html
+big-guy-little-guys-shared-v0.8.html
 ```
 
 This file supersedes the earlier split-prototype handoff that referenced separate Big Guy and Little Guys HTML files.
+
+## Documentation Update Policy
+
+Treat this GDD as a prototype snapshot, not a patch log.
+
+Do not update this file for routine changes like:
+
+- balance tuning
+- new enemy numbers
+- small UI adjustments
+- additional MODs that use the same MOD architecture
+- small lobby polish
+- visual tweaks
+
+Update this file only when the game changes radically enough that the current snapshot would mislead future work, such as:
+
+- a new core loop
+- a changed body-system model
+- a changed multiplayer/session model
+- a changed upgrade/MOD model
+- a new delivery target beyond the single-file GitHub Pages prototype
+- a major role redesign
+
+Routine future patches should use the architecture guide and the current HTML build as implementation references, then summarize the patch in chat or a patch note.
 
 ---
 
@@ -723,6 +753,7 @@ clicks disabled
 animated CSS coin
 coin sides: YOU / OTHER GUY
 result holds briefly before applying
+visible to both online browsers before the result applies
 ```
 
 ---
@@ -859,6 +890,7 @@ No explanatory paragraphs in the game UI.
 
 ```text
 click SOLO
+3 / 2 / 1 / GO countdown
 start as Big Guy
 inactive Little Guys AI runs
 minimap can switch active role
@@ -870,6 +902,7 @@ minimap can switch active role
 click HOST
 host gets 4-digit PIN
 host waits on WAITING FOR OTHER PLAYER TO JOIN screen
+BACK returns to the start screen before play begins
 ```
 
 Host does not choose role until another player connects.
@@ -881,11 +914,12 @@ click JOIN
 type 4-digit PIN
 CONNECT button appears after 4 digits
 click CONNECT
+BACK returns to the start screen before play begins
 ```
 
 ## Role Select
 
-After connection, both players go to a full-screen role-selection screen.
+After connection, both players go to a full-screen role-selection screen. BACK leaves the pre-game lobby and returns to the start flow.
 
 Choices:
 
@@ -907,6 +941,14 @@ If both choose the same role:
 ```text
 coin flip decides who gets that role
 other player gets the other role
+coin flip should be visible to both browsers
+```
+
+After roles resolve:
+
+```text
+3 / 2 / 1 / GO countdown
+then gameplay begins
 ```
 
 ---
@@ -925,12 +967,26 @@ Host:
 Client:
   sends commands/input
   renders snapshots
+  shows network-visible session events
   does not simulate gameplay
 ```
 
 This is required for stability.
 
 Do not let the non-host client run enemy/projectile/repair/update simulation.
+
+Current v0.8 hardening guardrails:
+
+```text
+COMMAND_RULES validates command permissions.
+state.tick tracks simulation progress.
+commandLog keeps a small recent history for debug.
+assertSnapshotSafe checks state before snapshot broadcast.
+Run Smoke Test checks core invariants from the debug panel.
+RNG helpers should be preferred over scattered gameplay Math.random calls.
+```
+
+These guardrails are not gameplay features. They exist to keep future gameplay patches from breaking host-authoritative multiplayer.
 
 ---
 
@@ -1053,19 +1109,21 @@ Likely next areas to improve:
 4. More interesting but controlled MOD effects.
 5. Better Big Guy character art/status feedback.
 6. Multiplayer disconnect/reconnect handling if needed.
-7. More robust browser compatibility testing for GitHub Pages host/join.
+7. Multiplayer disconnect/rejoin handling only if it becomes a repeated real playtest problem.
 
 ---
 
 # 21. Maintenance Requirement
 
-Future updates should use this handoff together with:
+Future updates should use this snapshot together with:
 
 ```text
-big-guy-little-guys-architecture-maintenance-v0.1.md
+big-guy-little-guys-architecture-maintenance-v0.2.md
 ```
 
 That guide defines how to keep changes system-level, multiplayer-safe, and agnostic of either player side.
+
+This snapshot should not need to change for normal gameplay updates. Use it as the baseline until the prototype's core assumptions change.
 
 Before implementing future patches, always identify:
 
@@ -1095,4 +1153,5 @@ paused shared MOD voting
 permanent MOD growth
 five canonical body systems
 and a strict requirement that future patches work for both sides and multiplayer
+with v0.8 stability guardrails for commands, snapshots, countdowns, coin flips, and smoke testing
 ```
