@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SCRAPWALKER</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* FTL-idiom steel palette */
+    --green:#69c46e; --blue:#7fb4c9; --orange:#e8a33d; --red:#d0453e; --gold:#e8c860;
+    --bg:#0c1116; --panel:#1d2b34; --edge:#48606f; --edge-hi:#5d7787;
+    --text:#cfe0ea; --dim:#7d919e;
+    --font:"Chakra Petch","Courier New",monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; user-select:none; -webkit-user-select:none;}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
+    font-family:var(--font); color:var(--text);
+    cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M2 2 L18 9 L10 11 L8 18 Z' fill='%2369c46e' stroke='%23081309' stroke-width='1.5'/%3E%3C/svg%3E") 2 2, auto;}
+  button{font-family:inherit;cursor:inherit;}
+  /* FTL's signature chamfered corners */
+  .cut{clip-path:polygon(9px 0, calc(100% - 9px) 0, 100% 9px, 100% calc(100% - 9px),
+    calc(100% - 9px) 100%, 9px 100%, 0 calc(100% - 9px), 0 9px);}
+
+  /* ---------- top bar (cross-game chrome) ---------- */
+  #topbar{position:fixed;top:0;left:0;right:0;height:58px;z-index:40;
+    display:flex;align-items:center;gap:14px;padding:8px 14px;
+    background:linear-gradient(#0c1116ee,#0c111600);pointer-events:none;}
+  .bars{flex:1;max-width:520px;display:flex;flex-direction:column;gap:5px;}
+  body.littleMode #topbar .bars{visibility:hidden;} /* the crew screen draws FTL readouts itself */
+  .barShell{height:16px;background:#000a;border:1px solid var(--edge);border-radius:2px;overflow:hidden;position:relative;}
+  .barFill{height:100%;width:100%;transition:width .12s linear;}
+  #hpFill{background:linear-gradient(90deg,#d0453e,#e8a33d);}
+  #xpFill{background:linear-gradient(90deg,#3fa34d,#69c46e);width:0%;}
+  .barLabel{position:absolute;inset:0;font-size:11px;line-height:15px;text-align:center;color:#fff;text-shadow:0 1px 2px #000;}
+  #shieldPips{position:absolute;right:4px;top:1px;font-size:11px;color:var(--blue);text-shadow:0 1px 2px #000;}
+  .stat{font-size:14px;white-space:nowrap;text-shadow:0 1px 2px #000;}
+  .stat b{color:var(--gold);}
+  #sideTag{margin-left:auto;pointer-events:auto;font-size:13px;padding:6px 12px;border:1px solid var(--edge);
+    background:#1d2b34cc;}
+  #sideTag b{color:var(--green);}
+  #muteBtn{pointer-events:auto;font-size:13px;padding:6px 10px;border:1px solid var(--edge);
+    background:#1d2b34cc;color:var(--text);}
+  #sideTag,#muteBtn{clip-path:polygon(7px 0, calc(100% - 7px) 0, 100% 7px, 100% calc(100% - 7px),
+    calc(100% - 7px) 100%, 7px 100%, 0 calc(100% - 7px), 0 7px);}
+
+  /* ---------- views ---------- */
+  #bigView{position:fixed;inset:0;z-index:1;}
+  #bigView canvas{display:block;}
+  #bigFx{position:fixed;inset:0;z-index:20;pointer-events:none;}
+  #littleView{position:fixed;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(1100px 760px at 46% 42%, #131b22 0%, #090d12 72%);}
+  #littleWrap{display:flex;align-items:flex-start;gap:12px;}
+  #littleCanvas{background:transparent;}
+  .hidden{display:none !important;}
+
+  /* ---------- hint panel (no shop — salvage IS the upgrade track) ---------- */
+  #hintBox{width:196px;background:var(--panel);border:1px solid var(--edge);
+    padding:11px;font-size:10.5px;line-height:1.55;color:var(--dim);}
+  #hintBox b{color:var(--text);}
+  #hintBox kbd{background:#16222b;border:1px solid var(--edge);border-radius:3px;padding:0 4px;font-size:10px;}
+
+  /* ---------- corner HUDs ---------- */
+  #miniInterior{position:fixed;right:14px;bottom:14px;z-index:30;border:1px solid var(--edge);
+    border-radius:4px;background:#0c1116e0;}
+  /* Little Guy's window on the fight — framed like the enemy-ship view */
+  #miniArena{position:fixed;right:14px;top:88px;z-index:30;border:2px solid var(--edge);
+    border-radius:4px;background:#0c1116f0;box-shadow:inset 0 1px 0 var(--edge-hi), 0 3px 10px #000a;}
+  #miniArenaTitle{position:fixed;right:14px;top:66px;z-index:30;width:234px;
+    background:var(--panel);border:2px solid var(--edge);border-bottom:none;border-radius:4px 4px 0 0;
+    font-size:11px;letter-spacing:2px;color:var(--dim);text-align:center;padding:3px 0;}
+
+  /* ---------- toasts (Big Guy view) ---------- */
+  #toasts{position:fixed;left:50%;top:70px;transform:translateX(-50%);z-index:45;
+    display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;}
+  .toast{font-size:13px;padding:6px 14px;background:#1d2b34e6;
+    border:1px solid var(--edge);text-shadow:0 1px 2px #000;animation:toastIn .18s ease-out;
+    clip-path:polygon(8px 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0 50%);}
+  .toast.warn{border-color:var(--orange);color:var(--orange);}
+  .toast.bad{border-color:var(--red);color:var(--red);}
+  .toast.good{border-color:var(--green);color:var(--green);}
+  @keyframes toastIn{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:none;}}
+
+  /* ---------- level-up modal ---------- */
+  #pickModal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+    background:#05070bb8;}
+  #pickModal .inner{text-align:center;}
+  #pickModal h2{color:var(--green);letter-spacing:2px;margin-bottom:4px;font-size:22px;text-shadow:0 0 18px #69c46e55;}
+  #pickModal .subtitle{color:var(--dim);font-size:12px;margin-bottom:16px;}
+  #pickCards{display:flex;gap:14px;justify-content:center;}
+  .pickCard{width:190px;min-height:150px;padding:14px 12px;background:var(--panel);
+    border:2px solid var(--edge);cursor:pointer;color:var(--text);
+    clip-path:polygon(11px 0, calc(100% - 11px) 0, 100% 11px, 100% calc(100% - 11px),
+      calc(100% - 11px) 100%, 11px 100%, 0 calc(100% - 11px), 0 11px);
+    display:flex;flex-direction:column;gap:8px;transition:transform .08s,border-color .08s;}
+  .pickCard:hover{transform:translateY(-4px);border-color:var(--green);}
+  .pickCard .icon{font-size:30px;}
+  .pickCard .name{font-size:14px;color:var(--gold);}
+  .pickCard .desc{font-size:11px;color:var(--dim);line-height:1.5;}
+
+  /* ---------- overlays ---------- */
+  .overlay{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(900px 600px at 50% 45%, #14251c 0%, #05070b 75%);}
+  .overlay .card{text-align:center;max-width:680px;padding:30px;}
+  .overlay h1{font-size:46px;letter-spacing:6px;color:var(--green);text-shadow:0 0 30px #69c46e55;margin-bottom:6px;}
+  .overlay .tag{color:var(--dim);font-size:14px;margin-bottom:22px;}
+  .overlay .cols{display:flex;gap:22px;text-align:left;font-size:12px;line-height:1.7;color:#b9c9d4;margin-bottom:24px;}
+  .overlay .cols>div{flex:1;background:#1d2b34aa;border:1px solid var(--edge);border-radius:5px;padding:12px 14px;
+    box-shadow:inset 0 1px 0 var(--edge-hi);}
+  .overlay .cols h4{color:var(--blue);font-size:13px;margin-bottom:6px;}
+  .overlay .cols h4.g{color:var(--green);}
+  .overlay kbd{background:#16222b;border:1px solid var(--edge);border-radius:3px;padding:0 5px;font-size:11px;}
+  .bigBtn{font-size:18px;letter-spacing:2px;padding:12px 40px;background:var(--green);color:#08130a;
+    border:none;font-weight:bold;
+    clip-path:polygon(12px 0, calc(100% - 12px) 0, 100% 12px, 100% calc(100% - 12px),
+      calc(100% - 12px) 100%, 12px 100%, 0 calc(100% - 12px), 0 12px);}
+  .bigBtn:hover{filter:brightness(1.1);}
+  #overStats{font-size:16px;line-height:2;margin-bottom:22px;color:var(--text);}
+  #overStats b{color:var(--gold);}
+  #dmgVignette{position:fixed;inset:0;z-index:35;pointer-events:none;opacity:0;
+    background:radial-gradient(ellipse at center, transparent 55%, #ff203055 100%);}
+  #throttleBanner{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);z-index:38;
+    font-size:14px;color:var(--green);text-shadow:0 0 12px #69c46e88;letter-spacing:1px;pointer-events:none;}
+</style>
+</head>
+<body>
+
+<div id="bigView"></div>
+<canvas id="bigFx"></canvas>
+
+<div id="littleView" class="hidden">
+  <div id="littleWrap">
+    <canvas id="littleCanvas" width="700" height="712"></canvas>
+    <div>
+      <div id="hintBox" class="cut">
+        <b>Crew:</b> click a goblin, portrait, or <kbd>1</kbd>–<kbd>6</kbd>, then a room.<br>
+        <b>Power:</b> click a system column — right-click removes. Every pip is output.<br>
+        <b>Doors:</b> click to seal. Bulkheads slow fire, air loss &amp; intruders.<br>
+        <b>Airlocks:</b> click a hull door to vent — fires suffocate. So do goblins.<br>
+        <b>Grow:</b> when a room is grown, click a glowing pad to weld it where doors line up.<br>
+        <b>Repair Rig:</b> power it to mend Big Guy's hull; man it to mend faster.<br>
+        <b>Upgrades:</b> the gold bar fills from salvage — then you pick.<br>
+        Weapons are <b>AUTO</b>. Keep them powered, manned, repaired.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="topbar">
+  <div class="bars">
+    <div class="barShell"><div class="barFill" id="hpFill"></div><div class="barLabel" id="hpLabel"></div><div id="shieldPips"></div></div>
+    <div class="barShell" style="height:10px"><div class="barFill" id="xpFill"></div></div>
+  </div>
+  <div class="stat" title="salvage → next upgrade pick">⛭ <b id="salvStat">0</b></div>
+  <div class="stat">LV <b id="lvlStat">1</b></div>
+  <div class="stat" id="timeStat">0:00</div>
+  <div id="sideTag" title="Tab to swap">YOU: <b id="sideName">BIG GUY</b> · <span style="color:var(--dim)">Tab swaps</span></div>
+  <button id="muteBtn">♪ on</button>
+</div>
+
+<canvas id="miniInterior" width="252" height="240"></canvas>
+<div id="miniArenaTitle" class="hidden">— SURFACE FEED —</div>
+<canvas id="miniArena" width="230" height="230" class="hidden"></canvas>
+<div id="toasts"></div>
+<div id="dmgVignette"></div>
+<div id="throttleBanner" class="hidden">▚ CREW CHOOSING UPGRADE — HORDE THINNING ▞</div>
+
+<div id="pickModal" class="hidden">
+  <div class="inner">
+    <h2>SALVAGE BANKED</h2>
+    <div class="subtitle">spend it — the crew decides what Scrapwalker becomes</div>
+    <div id="pickCards"></div>
+  </div>
+</div>
+
+<div id="startOverlay" class="overlay">
+  <div class="card">
+    <h1>SCRAPWALKER</h1>
+    <div class="tag">one mech · one crew · one health bar — solo mode with AI hot-swap</div>
+    <div class="cols">
+      <div>
+        <h4>BIG GUY — the mech</h4>
+        <kbd>WASD</kbd> / arrows to move — that's it. Weapons fire themselves.
+        Stand in a <b>shrine ring</b> to grow new rooms (and weapons) — the crew welds them on.
+        A <b>radar</b> tracks the swarm, shrines &amp; bosses on your level. Elites cause fires,
+        breaches &amp; boarders inside; <b>Alphas</b> surface on a cycle and drop fat caches.
+      </div>
+      <div>
+        <h4 class="g">LITTLE GUY — the crew</h4>
+        Run the interior like a ship. Send named goblins room to room; power systems
+        deep (every pip counts); seal bulkheads to contain fire and slow intruders;
+        <b>vent rooms to space</b> when you must. When a room grows, <b>weld it onto a pad</b>
+        where the doors line up; power the <b>Repair Rig</b> to mend the hull. Grubbers tunnel
+        in, systems rattle loose — always telegraphed. Salvage fills the gold bar; the pick is yours.
+      </div>
+    </div>
+    <div style="font-size:13px;color:var(--dim);margin-bottom:20px;">
+      <kbd>Tab</kbd> hot-swaps you between halves at any time — the AI runs the other one. <kbd>M</kbd> mute.
+    </div>
+    <button class="bigBtn" id="startBtn">POWER UP</button>
+  </div>
+</div>
+
+<div id="overOverlay" class="overlay hidden">
+  <div class="card">
+    <h1 style="color:var(--red);text-shadow:0 0 30px #d0453e66;">SCRAPWALKER FALLS</h1>
+    <div class="tag">the goblins will build another</div>
+    <div id="overStats"></div>
+    <button class="bigBtn" id="restartBtn">REBUILD</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/state.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/bigRender.js"></script>
+<script src="js/littleRender.js"></script>
+<script src="js/hud.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
