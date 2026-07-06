@@ -5,8 +5,17 @@
 
 window.HUD = (function () {
   let els = {};
-  let miniIntCtx, miniArCtx, bigFxCtx;
+  let miniIntCtx, miniArCtx, bigFxCtx, bigLoadCtx;
   let pickShownFor = null;
+
+  // build/upgrade readout order (weapons first, then support) — reactor is the power source, not shown
+  const LOADOUT_ORDER = ['armGun', 'armGun2', 'shields', 'legs', 'treads', 'air', 'head',
+    'coreOrbitals', 'mortar', 'zapper', 'sawWing', 'medbay', 'repair'];
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+  }
 
   const SYS_COLOR = {
     weapon: '#e8c860', shield: '#7fb4c9', leg: '#b48ce8',
@@ -28,13 +37,14 @@ window.HUD = (function () {
 
   function init() {
     ['hpFill', 'hpLabel', 'xpFill', 'shieldPips', 'salvStat', 'lvlStat', 'timeStat', 'sideName',
-     'miniInterior', 'miniArena', 'bigFx', 'toasts', 'dmgVignette', 'throttleBanner',
+     'miniInterior', 'miniArena', 'bigFx', 'bigLoadout', 'toasts', 'dmgVignette', 'throttleBanner',
      'pickModal', 'pickCards',
     ].forEach(id => els[id] = document.getElementById(id));
 
     miniIntCtx = els.miniInterior.getContext('2d');
     miniArCtx = els.miniArena.getContext('2d');
     bigFxCtx = els.bigFx ? els.bigFx.getContext('2d') : null;
+    bigLoadCtx = els.bigLoadout ? els.bigLoadout.getContext('2d') : null;
   }
 
   function fmtTime(t) {
@@ -61,8 +71,42 @@ window.HUD = (function () {
 
     // Big Guy runs the surface: give him the same radar the crew watches — the
     // swarm on his level, shrines, and bosses — plus his interior status window.
-    if (s.humanSide === 'big') { drawMiniInterior(s, time); drawCombatText(s, time); }
+    if (s.humanSide === 'big') { drawMiniInterior(s, time); drawCombatText(s, time); drawBigLoadout(s, time); }
     drawMiniArena(s, time);
+  }
+
+  /* ---------- Big Guy loadout row: every built part + its upgrade level (MegaBonk-style) ---------- */
+  function drawBigLoadout(s, time) {
+    if (!bigLoadCtx || !window.LITTLER || !LITTLER.sysIcon) return;
+    const c = bigLoadCtx;
+    c.clearRect(0, 0, c.canvas.width, c.canvas.height);
+    c.font = '9px "Chakra Petch", monospace';
+    c.textAlign = 'left';
+    c.fillStyle = '#7d919e';
+    c.fillText('LOADOUT', 6, 9);
+    const built = LOADOUT_ORDER.filter(id => s.rooms[id] && s.rooms[id].built);
+    const CW = 44, GAP = 4, x0 = 4, y0 = 13;
+    built.forEach((id, i) => {
+      const r = s.rooms[id];
+      const x = x0 + i * (CW + GAP), y = y0;
+      const active = G.systemActive(s, id);
+      const crisis = G.roomInCrisis(s, r);
+      const damaged = r.damage > 0;
+      c.fillStyle = 'rgba(12,17,22,0.85)';
+      roundRect(c, x, y, CW, CW, 5); c.fill();
+      c.strokeStyle = crisis ? (Math.sin(time * 8) > 0 ? '#ff5a4a' : '#d0453e')
+        : damaged ? '#e8a33d' : active ? '#5d7787' : '#31404c';
+      c.lineWidth = crisis || damaged ? 2 : 1;
+      roundRect(c, x, y, CW, CW, 5); c.stroke();
+      c.lineWidth = 1;
+      const col = crisis ? '#d0453e' : damaged ? '#e8a33d' : active ? '#cfe0ea' : '#5b646e';
+      LITTLER.sysIcon(c, id, x + CW / 2, y + CW / 2 - 4, 20, col);
+      // upgrade level (tier) as gold pips along the bottom
+      for (let t = 0; t < r.tier; t++) {
+        c.fillStyle = active ? '#e8c860' : '#6b6650';
+        c.fillRect(x + 6 + t * 8, y + CW - 8, 6, 4);
+      }
+    });
   }
 
   /* ---------- floating damage numbers over the 3D arena (Big Guy) ---------- */

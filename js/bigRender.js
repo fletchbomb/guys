@@ -207,6 +207,19 @@ window.BIGR = (function () {
     sawWing(g) {
       for (const side of [-1, 1]) { const w = box(1.2, 0.12, 0.6, 0xb8c4cc); w.position.set(side * 0.7, 0, -0.4); w.rotation.z = side * 0.4; w.rotation.y = side * 0.3; g.add(w); }
     },
+    armGun2(g) {   // a second gun-arm — twin barrels
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.34, 1.6, 8), new THREE.MeshLambertMaterial({ color: 0x5d6858 }));
+      barrel.rotation.x = Math.PI / 2; barrel.position.set(-0.18, 0.12, FRONT + 0.6); g.add(barrel);
+      const barrel2 = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 1.4, 8), new THREE.MeshLambertMaterial({ color: 0x4c5747 }));
+      barrel2.rotation.x = Math.PI / 2; barrel2.position.set(0.24, -0.16, FRONT + 0.5); g.add(barrel2);
+    },
+    treads(g) {   // crushing tracks at the base
+      for (const sx of [-0.5, 0.5]) {
+        const track = box(0.55, 0.8, 1.3, 0x2a2f36); track.position.set(sx, -0.15, 0.15); g.add(track);
+        const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.62, 8), new THREE.MeshLambertMaterial({ color: 0x6a7683 }));
+        hub.rotation.z = Math.PI / 2; hub.position.set(sx, -0.15, FRONT - 0.1); g.add(hub);
+      }
+    },
   };
 
   function buildRoomPart(id, sys) {

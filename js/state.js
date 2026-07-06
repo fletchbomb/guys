@@ -92,6 +92,7 @@ window.G = (function () {
     THROTTLE: 4.5,
     PICK_BASE: 22,
     PICK_GROW: 1.35,
+    LEVEL_HP: 8,               // every level-up toughens the hull a little
   };
 
   /* ---------- rooms ----------
@@ -113,9 +114,11 @@ window.G = (function () {
     mortar:       { name: 'SPIKE MORTAR', sys: 'weapon',  weapon: 'mortar',          tier: 1, slots: 2, station: 0,    built: false, rect: null, neighbors: [] },
     zapper:       { name: 'ZAP COIL',     sys: 'weapon',  weapon: 'zapper',          tier: 1, slots: 2, station: 0,    built: false, rect: null, neighbors: [] },
     sawWing:      { name: 'SAW WING',     sys: 'weapon',  weapon: 'sawWing',         tier: 1, slots: 2, station: 0,    built: false, rect: null, neighbors: [] },
+    armGun2:      { name: 'SECOND ARM',   sys: 'weapon',  weapon: 'armGun2',         tier: 1, slots: 2, station: 0,    built: false, rect: null, neighbors: [] },
+    treads:       { name: 'TREADS',       sys: 'tread',   weapon: 'treadRam',        tier: 1, slots: 2, station: 0,    built: false, rect: null, neighbors: [] },
   };
   const ROOM_IDS = Object.keys(ROOM_DEFS);
-  const EXPANSION_ORDER = ['head', 'coreOrbitals', 'medbay', 'repair', 'mortar', 'zapper', 'sawWing'];
+  const EXPANSION_ORDER = ['head', 'coreOrbitals', 'medbay', 'repair', 'mortar', 'zapper', 'sawWing', 'armGun2', 'treads'];
   const AIRLOCK_ROOMS = ['armGun', 'legs'];
   // where grafts may be welded on (all 2-slot pads around the base body)
   const GRAFT_SLOTS = {
@@ -127,6 +130,13 @@ window.G = (function () {
     sw: [150, 230, 100, 50],
     s:  [450, 280, 100, 50],
     s2: [250, 280, 100, 50],
+  };
+  // each part's suggested home on the body plan — the AI (and the placement UI's
+  // default highlight) prefer it, but the human crew can weld anywhere valid.
+  const HOME_SLOT = {
+    head: 'n', coreOrbitals: 'e', medbay: 'se', sawWing: 's',
+    mortar: 'w', repair: 'sw', zapper: 's2', armGun2: 'ne',
+    // treads has no fixed home — it goes wherever the crew welds it (best-connected for AI)
   };
   // shared wall long enough for a doorway (one full tile)
   function sharedWall(a, b) {
@@ -202,8 +212,16 @@ window.G = (function () {
       name: 'SAW', source: 'returning blade', room: 'sawWing', pattern: 'boomerang',
       cooldown: 3.5, damage: 16, reach: 25, flightTime: 1.6, radius: 1.6,
     },
+    armGun2: {
+      name: 'TWIN BOLT', source: 'second gun-arm', room: 'armGun2', pattern: 'projectile',
+      cooldown: 0.42, damage: 9, range: 28,
+    },
+    treadRam: {
+      name: 'RAM AURA', source: 'crushing treads', room: 'treads', pattern: 'aura',
+      damagePerSecond: 15, radius: 7,
+    },
   };
-  const WEAPON_ORDER = ['armGun', 'coreOrbitals', 'fireTrail', 'shieldShockwave', 'headFlame', 'mortar', 'zapper', 'sawWing'];
+  const WEAPON_ORDER = ['armGun', 'coreOrbitals', 'fireTrail', 'shieldShockwave', 'headFlame', 'mortar', 'zapper', 'sawWing', 'armGun2', 'treadRam'];
 
   const GOBLIN_NAMES = ['Grub', 'Sprocket', 'Nixie', 'Bolt', 'Wick', 'Tansy', 'Gizmo', 'Pip'];
 
@@ -318,11 +336,13 @@ window.G = (function () {
       intruders: [],
       weapons: {
         armGun: { cd: 0 },
+        armGun2: { cd: 0 },
         headFlame: { cd: 0 },
         coreOrbitals: { angle: 0 },
         mortar: { cd: 0 },
         zapper: { cd: 0 },
         sawWing: { cd: 0 },
+        treadRam: { cd: 0 },
         fallback: { cd: 0 },
       },
       trails: [],
@@ -333,12 +353,12 @@ window.G = (function () {
       bolts: [],
       pickups: [],       // {kind:'salv'|'cache'|'heal', x,z,v,seed}
       fx: [],
-      shrine: null,      // {x,z,progress} — stand inside to channel a graft
-      pendingGraft: null,// {room} — grown but awaiting the crew's placement
+      shrine: null,      // {x,z,progress} — channel it for an instant level-up
+      pendingGraft: null,// {room} chosen at level-up, awaiting the crew to weld it on
       shrineT: CONFIG.SHRINE_FIRST,
       bossT: CONFIG.BOSS_FIRST,
       spawn: { timer: 1.2, ramp: 0, rampT: CONFIG.RAMP_EVERY },
-      levelUp: { pending: false, options: null, throttle: 0, aiT: 0, need: CONFIG.PICK_BASE, cost: 0 },
+      levelUp: { pending: false, free: false, options: null, throttle: 0, aiT: 0, need: CONFIG.PICK_BASE },
       hazard: { t: CONFIG.HAZARD_FIRST, warn: null, squallT: 0, squallRollT: 0 },
       toasts: [],
       stats: { crisesSurvived: 0, shockwaves: 0, flameBursts: 0, vented: 0, events: 0, bosses: 0, roomsGrown: 0 },
@@ -433,7 +453,7 @@ window.G = (function () {
 
   return {
     CONFIG, ROOM_DEFS, ROOM_IDS, WEAPON_DEFS, WEAPON_ORDER, AIRLOCK_ROOMS, EXPANSION_ORDER,
-    GRAFT_SLOTS,
+    GRAFT_SLOTS, HOME_SLOT,
     state: null,
     newState, makeGoblin, makeIntruder, doorKey,
     geoNeighbors, validGraftSlots,

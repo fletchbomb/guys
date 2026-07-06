@@ -68,7 +68,7 @@ window.AI = (function () {
       s.levelUp.aiT -= dt;
       if (s.levelUp.aiT <= 0) G.submitIntent({ t: 'pick', idx: pickChoice(s) });
     }
-    if (s.pendingGraft) placeGraft(s);   // weld a grown room onto the best-connected pad
+    if (s.pendingGraft) placeGraft(s);   // weld the chosen part onto a pad
     decideT -= dt;
     if (decideT > 0) return;
     decideT = 0.35;
@@ -79,27 +79,26 @@ window.AI = (function () {
   }
 
   function placeGraft(s) {
-    const slots = G.validGraftSlots(s);
-    if (!slots.length) return;
-    let best = slots[0], bn = -1;
-    for (const sl of slots) {
-      const n = G.geoNeighbors(s, sl.rect).length;   // hug the body: most doorways
-      if (n > bn) { bn = n; best = sl; }
+    const valid = G.validGraftSlots(s);
+    if (!valid.length) return;
+    const home = G.HOME_SLOT[s.pendingGraft.room];
+    let key = valid.some(v => v.key === home) ? home : null;
+    if (!key) {   // fall back to the best-connected pad
+      let bn = -1;
+      for (const sl of valid) { const n = G.geoNeighbors(s, sl.rect).length; if (n > bn) { bn = n; key = sl.key; } }
     }
-    G.submitIntent({ t: 'placeGraft', slot: best.key });
+    G.submitIntent({ t: 'placeGraft', slot: key });
   }
 
   function pickChoice(s) {
     const o = s.levelUp.options || [];
     const rank = (opt) => {
       if (!opt) return -1;
-      if (opt.id === 'hp' && s.hp / s.maxHp < 0.5) return 6;
-      if (opt.id === 'pip' && s.reactor.pips < 7) return 5;
-      if (opt.id === 'goblin' && s.goblins.length < 4) return 4;
-      if (opt.id === 'upg') return 3;
-      if (opt.id === 'crit') return 3;
-      if (opt.id === 'pip') return 2;
-      if (opt.id === 'magnet') return 2;
+      if (opt.id === 'hull' && s.hp / s.maxHp < 0.5) return 6;
+      if (opt.id === 'crew' && s.goblins.length < 4) return 5;   // keep enough hands to man rooms
+      if (opt.id === 'build') return 4;                          // then grow the arsenal
+      if (opt.id === 'upgrade') return 3;
+      if (opt.id === 'crew') return 2;
       return 1;
     };
     let best = 0;
@@ -160,7 +159,7 @@ window.AI = (function () {
     }
 
     // man the value stations — bring the repair rig online while the hull is hurt
-    const stations = ['armGun', 'shields', 'legs', 'head', 'coreOrbitals', 'mortar', 'zapper', 'sawWing'];
+    const stations = ['armGun', 'armGun2', 'shields', 'legs', 'treads', 'head', 'coreOrbitals', 'mortar', 'zapper', 'sawWing'];
     if (s.rooms.repair.built && s.hp < s.maxHp * 0.85) stations.unshift('repair');
     for (const id of stations) {
       if (!s.rooms[id].built) continue;
@@ -202,12 +201,12 @@ window.AI = (function () {
   /* power: output scales per pip, so stack deep in priority order */
   function allocatePower(s) {
     const wish = [
-      ['armGun', 1], ['shields', 1], ['legs', 1], ['air', 1],
+      ['armGun', 1], ['shields', 1], ['legs', 1], ['air', 1], ['armGun2', 1], ['treads', 1],
       ['coreOrbitals', 1], ['head', 1], ['mortar', 1], ['zapper', 1], ['sawWing', 1],
-      ['shields', 2], ['armGun', 2], ['legs', 2],
-      ['coreOrbitals', 2], ['head', 2], ['mortar', 2], ['zapper', 2],
+      ['shields', 2], ['armGun', 2], ['legs', 2], ['armGun2', 2],
+      ['coreOrbitals', 2], ['head', 2], ['mortar', 2], ['zapper', 2], ['treads', 2],
       ['shields', 3], ['armGun', 3], ['legs', 3], ['air', 2],
-      ['coreOrbitals', 3], ['head', 3], ['sawWing', 2],
+      ['coreOrbitals', 3], ['head', 3], ['sawWing', 2], ['armGun2', 3],
     ];
     const target = {};
     for (const id of G.ROOM_IDS) if (s.rooms[id].sys !== 'reactor') target[id] = 0;

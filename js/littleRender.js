@@ -46,9 +46,9 @@ window.LITTLER = (function () {
     zapper:       { rect: [450, 280, 100, 50] },
     legs:         { rect: [350, 280, 100, 100] },
   };
+  // only the hull rooms that actually have airlocks (must match AIRLOCK_ROOMS in state)
   const AIRLOCK_PX = {
     armGun: { x: 250, y: 155, horiz: false, out: -1 },
-    medbay: { x: 550, y: 255, horiz: false, out: 1 },
     legs:   { x: 400, y: 380, horiz: true, out: 1 },
   };
   /* base hull: the headless starting brute (armGun/reactor/shields/air/legs).
@@ -65,7 +65,7 @@ window.LITTLER = (function () {
   ];
   const CLUSTER = { px: 6, py: 556, pw: 288, ph: 152, x0: 42, colW: 22, iconY: 686, pipH: 8, pipGap: 10 };
   const CLUSTER_ORDER = ['shields', 'legs', 'air', 'medbay', 'repair', 'armGun', 'coreOrbitals', 'head', 'mortar', 'zapper', 'sawWing'];
-  const WEAPON_BAR = { x0: 300, y0: 644, w: 47, h: 62, gap: 2.5 };
+  const WEAPON_BAR = { x0: 300, y0: 644, w: 37, h: 62, gap: 2 };
   const WEAPON_ORDER = G.WEAPON_ORDER;
   const PORTRAITS = { x: 10, y: 76, w: 178, h: 48, gap: 5 };
   const dust = [];
@@ -243,18 +243,21 @@ window.LITTLER = (function () {
     }
   }
 
-  /* ---------- graft placement: crew chooses which pad to weld the new room onto ---------- */
+  /* ---------- graft placement: the crew welds the chosen part onto a pad they pick ---------- */
   function drawGraftPlacement(s, time) {
     if (!s.pendingGraft) return;
     const id = s.pendingGraft.room;
+    const home = G.HOME_SLOT[id];
     const pulse = 0.5 + 0.5 * Math.sin(time * 4);
     for (const { key, rect } of G.validGraftSlots(s)) {
       const [x, y, w, h] = rect;
+      const suggested = key === home;
       ctx.save();
       ctx.fillStyle = 'rgba(105,196,110,' + (0.08 + 0.10 * pulse) + ')';
       chamfer(ctx, x, y, w, h, 8); ctx.fill();
-      ctx.strokeStyle = 'rgba(105,196,110,' + (0.5 + 0.45 * pulse) + ')';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = suggested ? 'rgba(232,200,96,' + (0.6 + 0.4 * pulse) + ')'
+        : 'rgba(105,196,110,' + (0.5 + 0.45 * pulse) + ')';
+      ctx.lineWidth = suggested ? 3 : 2;
       ctx.setLineDash([6, 5]);
       chamfer(ctx, x, y, w, h, 8); ctx.stroke();
       ctx.setLineDash([]);
@@ -263,11 +266,10 @@ window.LITTLER = (function () {
       ctx.restore();
       regions.push({
         x, y, w, h,
-        tip: { t: 'WELD ' + s.rooms[id].name + ' HERE', b: 'doors line up — click to install' },
+        tip: { t: 'WELD ' + s.rooms[id].name + ' HERE', b: suggested ? 'suggested spot — click to install' : 'doors line up — click to install' },
         act: () => G.submitIntent({ t: 'placeGraft', slot: key }),
       });
     }
-    // prompt
     ctx.font = 'bold 12px ' + FONT;
     ctx.textAlign = 'center';
     ctx.fillStyle = Math.sin(time * 4) > -0.3 ? COL.green : '#3f7d43';
@@ -471,7 +473,7 @@ window.LITTLER = (function () {
   /* ---------- airlocks: exterior doors onto the void ---------- */
   function drawAirlocks(s, time) {
     for (const id in AIRLOCK_PX) {
-      if (!s.rooms[id].built) continue;
+      if (!s.rooms[id].built || !s.airlocks[id]) continue;
       const a = AIRLOCK_PX[id];
       const open = s.airlocks[id].open;
       const L = 24, TH = 9;
@@ -526,7 +528,8 @@ window.LITTLER = (function () {
     // painted sprite icon (state is conveyed by pips/overlays around it); vector fallback below
     const sys = G.ROOM_DEFS[id] && G.ROOM_DEFS[id].sys;
     const fr = ICON_FRAME[sys];
-    if (fr != null && ASSETS.ready('icons')) {
+    // armGun2 shares the 'weapon' sys but gets its own code-drawn icon (no icon reuse)
+    if (fr != null && ASSETS.ready('icons') && id !== 'armGun2') {
       const d = sz * 1.7;
       ASSETS.drawCell(c, 'icons', fr, x - d / 2, y - d / 2, d, d);
       return;
@@ -615,6 +618,20 @@ window.LITTLER = (function () {
         k ? c.lineTo(px, py) : c.moveTo(px, py);
       }
       c.closePath(); c.stroke();
+    } else if (id === 'armGun2') {
+      // twin barrels — the second gun-arm
+      c.fillRect(-h * 0.75, -sz * 0.24, sz * 0.85, sz * 0.2);
+      c.fillRect(h * 0.55, -sz * 0.2, sz * 0.22, sz * 0.11);
+      c.fillRect(-h * 0.75, sz * 0.05, sz * 0.85, sz * 0.2);
+      c.fillRect(h * 0.55, sz * 0.09, sz * 0.22, sz * 0.11);
+      c.fillRect(-h * 0.85, -sz * 0.28, sz * 0.22, sz * 0.56);   // shared mount
+    } else if (id === 'treads') {
+      // tracked wheels
+      c.lineWidth = Math.max(2, sz * 0.09);
+      c.beginPath(); c.ellipse(0, 0, h * 0.92, h * 0.5, 0, 0, 7); c.stroke();
+      c.beginPath(); c.arc(-h * 0.45, 0, h * 0.22, 0, 7); c.fill();
+      c.beginPath(); c.arc(h * 0.45, 0, h * 0.22, 0, 7); c.fill();
+      for (let k = -2; k <= 2; k++) c.fillRect(k * sz * 0.16 - 1, -h * 0.6, 2, sz * 0.12);
     }
     c.restore();
   }
@@ -1227,81 +1244,73 @@ window.LITTLER = (function () {
     c.fillRect(x - 3, y - 1, 6, 5);   // body
   }
 
+  // shared card geometry (draw + qa clicks): cards size to fit the built systems
+  function clusterCardGeom(builtLen) {
+    const P = CLUSTER, areaX = P.px + 40, areaR = P.px + P.pw - 6, gap = 3;
+    const cw = Math.max(20, Math.min(38, (areaR - areaX + gap) / Math.max(1, builtLen) - gap));
+    return { areaX, gap, cw };
+  }
+
   function drawPowerCluster(s, time) {
+    const P = CLUSTER;
     ctx.fillStyle = COL.panel;
-    chamfer(ctx, CLUSTER.px, CLUSTER.py, CLUSTER.pw, CLUSTER.ph, 8);
-    ctx.fill();
+    chamfer(ctx, P.px, P.py, P.pw, P.ph, 8); ctx.fill();
     ctx.strokeStyle = COL.panelEdge;
-    chamfer(ctx, CLUSTER.px, CLUSTER.py, CLUSTER.pw, CLUSTER.ph, 8);
-    ctx.stroke();
-    ctx.font = '9px ' + FONT;
-    ctx.fillStyle = COL.dim;
-    ctx.textAlign = 'left';
-    ctx.fillText('POWER', CLUSTER.px + 8, CLUSTER.py + 13);
+    chamfer(ctx, P.px, P.py, P.pw, P.ph, 8); ctx.stroke();
 
     const used = SIM.usedPips(s);
     const free = s.reactor.pips - used;
-    for (let i = 0; i < s.reactor.pips; i++) {
-      const py = CLUSTER.iconY - 2 - i * CLUSTER.pipGap;
-      if (i < free) {
-        ctx.fillStyle = COL.green;
-        ctx.fillRect(16, py, 22, CLUSTER.pipH);
-      } else {
-        ctx.strokeStyle = '#3a4854';
-        ctx.strokeRect(16, py, 22, CLUSTER.pipH);
-      }
-    }
 
-    CLUSTER_ORDER.forEach((id, i) => {
+    // reactor bank on the left: free power stacked as green bars (FTL read)
+    ctx.font = '8px ' + FONT; ctx.textAlign = 'left'; ctx.fillStyle = COL.dim;
+    ctx.fillText('REACTOR', P.px + 8, P.py + 12);
+    const rbX = P.px + 10, rbW = 20, rbBottom = P.py + P.ph - 20;
+    for (let i = 0; i < s.reactor.pips; i++) {
+      const py = rbBottom - i * 8;
+      if (i < free) { ctx.fillStyle = COL.green; ctx.fillRect(rbX, py, rbW, 6); }
+      else { ctx.strokeStyle = '#3a4854'; ctx.strokeRect(rbX, py, rbW, 6); }
+    }
+    ctx.fillStyle = COL.gold; ctx.font = 'bold 10px ' + FONT; ctx.textAlign = 'center';
+    ctx.fillText(free + '/' + s.reactor.pips, rbX + rbW / 2, P.py + P.ph - 7);
+
+    // one FTL-style card per built system: icon + status border + stacked power bars
+    const built = CLUSTER_ORDER.filter(id => s.rooms[id].built);
+    const G0 = clusterCardGeom(built.length);
+    const cardTop = P.py + 18, cardH = P.ph - 26, cardBot = cardTop + cardH;
+    built.forEach((id, i) => {
       const r = s.rooms[id];
-      const cx = CLUSTER.x0 + i * CLUSTER.colW + CLUSTER.colW / 2;
-      if (!r.built) {
-        // empty socket: a system slot the mech hasn't grown yet
-        ctx.strokeStyle = '#26333d';
-        ctx.beginPath(); ctx.arc(cx, CLUSTER.iconY, 11, 0, 7); ctx.stroke();
-        ctx.fillStyle = '#26333d';
-        ctx.font = '11px ' + FONT;
-        ctx.textAlign = 'center';
-        ctx.fillText('+', cx, CLUSTER.iconY + 4);
-        regions.push({
-          x: cx - CLUSTER.colW / 2, y: CLUSTER.py + 16, w: CLUSTER.colW, h: CLUSTER.ph - 20,
-          tip: { t: r.name, b: 'not grown yet — channel a shrine' },
-          act: () => {},
-        });
-        return;
-      }
       const cap = G.roomCap(r);
+      const active = G.systemActive(s, id);
+      const crisis = G.roomInCrisis(s, r);
+      const x = G0.areaX + i * (G0.cw + G0.gap), cw = G0.cw;
+
+      ctx.fillStyle = 'rgba(9,13,18,0.55)';
+      chamfer(ctx, x, cardTop, cw, cardH, 4); ctx.fill();
+      ctx.strokeStyle = crisis ? (Math.sin(time * 8) > 0 ? '#ff5a4a' : COL.red)
+        : r.damage > 0 ? COL.orange : active ? COL.panelHi : '#31404c';
+      ctx.lineWidth = crisis || r.damage > 0 ? 1.5 : 1;
+      chamfer(ctx, x, cardTop, cw, cardH, 4); ctx.stroke();
+      ctx.lineWidth = 1;
+
+      const iconCol = cap === 0 ? (Math.sin(time * 8) > 0 ? COL.red : '#7d2a26')
+        : r.damage > 0 ? COL.orange : active ? COL.text : '#5b646e';
+      drawSysIcon(ctx, id, x + cw / 2, cardTop + 15, 16, iconCol);
+      if (G.roomManned(s, id)) personGlyph(ctx, x + cw / 2, cardTop + 4, COL.gold);
+
+      // power bars stacked bottom-up: filled = powered, outline = spare capacity, red-X = damaged
+      const barW = cw - 8, bx = x + 4;
       for (let t = 0; t < r.tier; t++) {
-        const py = CLUSTER.iconY - 18 - t * CLUSTER.pipGap;
+        const by = cardBot - 8 - t * 7;
         if (t >= cap) {
-          ctx.strokeStyle = COL.red;
-          ctx.strokeRect(cx - 8, py, 16, CLUSTER.pipH);
-          ctx.beginPath();
-          ctx.moveTo(cx - 8, py); ctx.lineTo(cx + 8, py + CLUSTER.pipH);
-          ctx.moveTo(cx + 8, py); ctx.lineTo(cx - 8, py + CLUSTER.pipH);
-          ctx.stroke();
-        } else if (t < r.power) {
-          ctx.fillStyle = COL.green;
-          ctx.fillRect(cx - 8, py, 16, CLUSTER.pipH);
-        } else {
-          ctx.strokeStyle = '#5b646e';
-          ctx.strokeRect(cx - 8, py, 16, CLUSTER.pipH);
-        }
+          ctx.strokeStyle = COL.red; ctx.strokeRect(bx, by, barW, 5);
+          ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + barW, by + 5); ctx.moveTo(bx + barW, by); ctx.lineTo(bx, by + 5); ctx.stroke();
+        } else if (t < r.power) { ctx.fillStyle = COL.green; ctx.fillRect(bx, by, barW, 5); }
+        else { ctx.strokeStyle = '#5b646e'; ctx.strokeRect(bx, by, barW, 5); }
       }
-      // icon in a base circle; person glyph above when manned
-      ctx.fillStyle = '#0f151a';
-      ctx.beginPath(); ctx.arc(cx, CLUSTER.iconY, 11, 0, 7); ctx.fill();
-      ctx.strokeStyle = G.systemActive(s, id) ? COL.panelHi : '#31404c';
-      ctx.beginPath(); ctx.arc(cx, CLUSTER.iconY, 11, 0, 7); ctx.stroke();
-      const iconCol = G.roomCap(r) === 0 ? (Math.sin(time * 8) > 0 ? COL.red : '#7d2a26')
-        : r.damage > 0 ? COL.orange
-        : G.systemActive(s, id) ? COL.text : '#5b646e';
-      drawSysIcon(ctx, id, cx, CLUSTER.iconY, 14, iconCol);
-      if (G.roomManned(s, id)) personGlyph(ctx, cx, CLUSTER.iconY - 18 - r.tier * CLUSTER.pipGap, COL.gold);
 
       regions.push({
-        x: cx - CLUSTER.colW / 2, y: CLUSTER.py + 16, w: CLUSTER.colW, h: CLUSTER.ph - 20,
-        tip: { t: r.name, b: r.power + '/' + cap + ' power · click +, right-click −' },
+        x, y: cardTop, w: cw, h: cardH,
+        tip: { t: r.name + '  L' + r.tier, b: r.power + '/' + cap + ' power · click +, right-click −' },
         act: (right) => G.submitIntent({ t: 'power', room: id, delta: right ? -1 : 1 }),
       });
     });
@@ -1315,7 +1324,7 @@ window.LITTLER = (function () {
 
   function drawWeaponBar(s, time) {
     ctx.font = '8px ' + FONT;
-    const CD_WEAPONS = { armGun: 1, headFlame: 1, mortar: 1, zapper: 1, sawWing: 1 };
+    const CD_WEAPONS = { armGun: 1, armGun2: 1, headFlame: 1, mortar: 1, zapper: 1, sawWing: 1 };
     WEAPON_ORDER.forEach((wid, i) => {
       const def = G.WEAPON_DEFS[wid];
       const r = s.rooms[def.room];
@@ -1441,11 +1450,14 @@ window.LITTLER = (function () {
     tileXY, doorPx,
     airlockPx: id => AIRLOCK_PX[id],
     clusterColXY: id => {
-      const i = CLUSTER_ORDER.indexOf(id);
-      return { x: CLUSTER.x0 + i * CLUSTER.colW + CLUSTER.colW / 2, y: CLUSTER.py + CLUSTER.ph / 2 };
+      // mirrors drawPowerCluster's card layout (built systems only, sized to fit)
+      const built = CLUSTER_ORDER.filter(rid => G.state.rooms[rid].built);
+      const i = built.indexOf(id);
+      const g = clusterCardGeom(built.length);
+      return { x: g.areaX + i * (g.cw + g.gap) + g.cw / 2, y: CLUSTER.py + CLUSTER.ph / 2 };
     },
     portraitXY: i => ({ x: PORTRAITS.x + PORTRAITS.w / 2, y: PORTRAITS.y + i * (PORTRAITS.h + PORTRAITS.gap) + PORTRAITS.h / 2 }),
   };
 
-  return { init, draw, selectGoblin, layout: ROOM_LAYOUT, debug, get selected() { return selected; } };
+  return { init, draw, selectGoblin, sysIcon: drawSysIcon, layout: ROOM_LAYOUT, debug, get selected() { return selected; } };
 })();

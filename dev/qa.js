@@ -82,34 +82,101 @@ function occupancyOK(s) {
   return true;
 }
 
-/* ================= growth: shrines graft rooms ================= */
-section('Shrines grow the mech');
+/* ================= progression: one economy, Build vs Upgrade ================= */
+section('Level-up economy (Build / Upgrade / Shrine)');
 {
   const s = fresh();
-  check('Run starts with 5 rooms (headless brute)', G.builtIds(s).length === 5,
-    G.builtIds(s).join(','));
+  check('Run starts with 5 rooms (headless brute)', G.builtIds(s).length === 5, G.builtIds(s).join(','));
   check('Head Flame is a socket, not a weapon, at start', !G.weaponActive(s, 'headFlame'));
-  s.shrine = { x: s.big.x, z: s.big.z, progress: 0 };
-  run(s, C.SHRINE_CHANNEL + 1);
-  // channeling GROWS the room but the crew must weld it on before it's part of the body
-  check('Channeling a shrine grows the next room (HEAD) but leaves it unbuilt',
-    !s.rooms.head.built && s.pendingGraft && s.pendingGraft.room === 'head');
-  const slots = G.validGraftSlots(s);
-  check('Valid weld pads are offered (doors line up)', slots.length > 0, slots.map(v => v.key).join(','));
-  G.submitIntent({ t: 'placeGraft', slot: slots[0].key });
+  // XP bar → level-up with three cards: BUILD, UPGRADE, +GOBLIN
+  s.salvage = s.levelUp.need;
   SIM.tick(s, TICK);
-  check('Welding on a pad builds HEAD and clears the pending graft',
-    s.rooms.head.built && s.stats.roomsGrown === 1 && !s.pendingGraft);
-  check('Placed room derived a neighbor + doorway from geometry',
-    s.rooms.head.neighbors.length > 0 &&
-    s.rooms.head.neighbors.every(n => s.doors[G.doorKey('head', n)] &&
-      s.rooms[n].neighbors.includes('head')),
-    s.rooms.head.neighbors.join(','));
-  check('Graft order holds', G.nextExpansion(s) === 'coreOrbitals');
+  check('XP bar full → level-up pending', s.levelUp.pending);
+  const opts = s.levelUp.options || [];
+  check('Three options offered', opts.length === 3, opts.map(o => o.id).join(','));
+  check('Build, Upgrade and +Goblin are the three',
+    opts.some(o => o.id === 'build') && opts.some(o => o.id === 'upgrade') && opts.some(o => o.id === 'crew'),
+    opts.map(o => o.id).join(','));
+}
+{
+  // BUILD hands a part to the crew; they weld it onto a pad THEY choose (manual placement)
+  const s = fresh();
+  s.salvage = s.levelUp.need;
+  SIM.tick(s, TICK);
+  const bi = (s.levelUp.options || []).findIndex(o => o.id === 'build');
+  const part = s.levelUp.options[bi].room;
+  const need0 = s.levelUp.need, crew0 = s.goblins.length, lvl0 = s.level;
+  G.submitIntent({ t: 'pick', idx: bi });
+  SIM.tick(s, TICK);
+  check('BUILD queues the part for placement (not auto-installed)',
+    !s.rooms[part].built && s.pendingGraft && s.pendingGraft.room === part);
+  check('Level up spent XP and raised the bar', s.salvage < need0 && s.levelUp.need > need0 && s.level === lvl0 + 1);
+  // the crew chooses the pad
+  const pads = G.validGraftSlots(s);
+  const chosen = pads.find(p => p.key === 'e') || pads[0];
+  G.submitIntent({ t: 'placeGraft', slot: chosen.key });
+  SIM.tick(s, TICK);
+  check('Chosen pad installs the part with a rect + doorways',
+    s.rooms[part].built && s.rooms[part].rect &&
+    s.rooms[part].rect[0] === G.GRAFT_SLOTS[chosen.key][0] &&
+    s.rooms[part].neighbors.length > 0 &&
+    s.rooms[part].neighbors.every(n => s.doors[G.doorKey(part, n)] && s.rooms[n].neighbors.includes(part)),
+    part + '@' + chosen.key + ':' + s.rooms[part].neighbors.join(','));
+  check('Building a part does NOT add a free goblin (crew grows via the +GOBLIN card)',
+    s.goblins.length === crew0);
+  check('A pending graft blocks the next level-up until placed', (() => {
+    const t = fresh(); t.salvage = t.levelUp.need; SIM.tick(t, TICK);
+    const b = (t.levelUp.options || []).findIndex(o => o.id === 'build');
+    G.submitIntent({ t: 'pick', idx: b }); SIM.tick(t, TICK);
+    t.salvage = t.levelUp.need * 3; run(t, 1);
+    return t.pendingGraft && !t.levelUp.pending;   // still waiting to place, no new level
+  })());
+  // crew can path into the freshly built room
   const g = s.goblins[0];
-  G.submitIntent({ t: 'goblin', id: g.id, room: 'head' });
-  run(s, 5);
-  check('Crew can walk into the grafted room', g.room === 'head');
+  G.submitIntent({ t: 'goblin', id: g.id, room: part });
+  run(s, 6);
+  check('Crew can walk into the built room', g.room === part);
+}
+{
+  // UPGRADE advances a part's level
+  const s = fresh();
+  s.salvage = s.levelUp.need;
+  SIM.tick(s, TICK);
+  const ui = (s.levelUp.options || []).findIndex(o => o.id === 'upgrade');
+  const room = s.levelUp.options[ui].room;
+  const tier0 = s.rooms[room].tier, pips0 = s.reactor.pips;
+  G.submitIntent({ t: 'pick', idx: ui });
+  SIM.tick(s, TICK);
+  check('UPGRADE raises the part one level', s.rooms[room].tier === tier0 + 1);
+  check('Level-up grants a reactor pip to run it', s.reactor.pips === pips0 + 1);
+}
+{
+  // +GOBLIN card adds a crew member (crew now grows here, not for free with builds)
+  const s = fresh();
+  s.salvage = s.levelUp.need;
+  SIM.tick(s, TICK);
+  const ci = (s.levelUp.options || []).findIndex(o => o.id === 'crew');
+  const crew0 = s.goblins.length;
+  G.submitIntent({ t: 'pick', idx: ci });
+  SIM.tick(s, TICK);
+  check('+GOBLIN card adds a crew member', s.goblins.length === crew0 + 1);
+}
+{
+  // a channeled shrine is a FREE, instant level-up (no XP spent)
+  const s = fresh();
+  const salv0 = s.salvage, lvl0 = s.level, need0 = s.levelUp.need;
+  s.shrine = { x: s.big.x, z: s.big.z, progress: 0.99 };
+  run(s, 1);
+  check('Shrine channel grants an instant level-up', s.levelUp.pending && s.levelUp.free);
+  const idx = 0;
+  G.submitIntent({ t: 'pick', idx });
+  SIM.tick(s, TICK);
+  check('Shrine level-up is free — no XP drained, bar unchanged',
+    s.salvage === salv0 && s.levelUp.need === need0 && s.level === lvl0 + 1);
+}
+{
+  // leaving the shrine ring drains the channel
+  const s = fresh();
   s.shrine = { x: s.big.x, z: s.big.z, progress: 0.5 };
   G.submitIntent({ t: 'bigMove', x: 1, z: 0 });
   run(s, 1.2);
@@ -120,38 +187,11 @@ section('Shrines grow the mech');
 }
 {
   const s = fresh();
-  // a grown-but-unplaced room blocks the next shrine until it's welded on
-  s.pendingGraft = { room: 'head' };
-  s.shrineT = 0.1;
-  run(s, 2);
-  check('A pending graft blocks the next shrine from rising', s.shrine === null);
-}
-{
-  // player chooses the pad: two different valid pads both connect the room
-  const s = fresh();
-  s.pendingGraft = { room: 'head' };
-  const opts = G.validGraftSlots(s);
-  const pick = opts.find(o => o.key === 'e') || opts[0];
-  G.submitIntent({ t: 'placeGraft', slot: pick.key });
-  SIM.tick(s, TICK);
-  check('Crew can weld the room onto the pad they choose',
-    s.rooms.head.built && s.rooms.head.rect[0] === G.GRAFT_SLOTS[pick.key][0]);
-}
-{
-  const s = fresh();
-  for (const id of G.EXPANSION_ORDER) s.rooms[id].built = true;
-  s.shrine = { x: s.big.x, z: s.big.z, progress: 0.99 };
-  const salv0 = s.salvage;
-  run(s, 1);
-  check('Fully grown: shrines pay salvage instead', s.salvage === salv0 + C.SHRINE_SALVAGE);
-}
-{
-  const s = fresh();
   const g = s.goblins[0];
   const dest0 = g.dest;
   G.submitIntent({ t: 'goblin', id: g.id, room: 'medbay' });   // unbuilt
   SIM.tick(s, TICK);
-  check('Orders to ungrown rooms are ignored', g.dest === dest0);
+  check('Orders to unbuilt rooms are ignored', g.dest === dest0);
 }
 
 /* ================= new weapons (Megabonk patterns) ================= */
@@ -183,6 +223,25 @@ section('Grafted weapons');
   const e = addEnemy(s, 0, 12, 200);
   run(s, 5);
   check('Saw Wing sweeps out and back through enemies', e.hp < 200, 'hp ' + e.hp.toFixed(0));
+}
+{
+  // SECOND ARM: a twin bolter that fires on its own
+  const s = fresh();
+  build(s, 'armGun2', 1);
+  power(s, 'armGun', -1);   // isolate the second arm
+  const e = addEnemy(s, 14, 0, 200);
+  run(s, 3);
+  check('Second Arm auto-fires twin bolts', e.hp < 200, 'hp ' + e.hp.toFixed(0));
+}
+{
+  // TREADS: a crushing contact aura + a move-speed boost
+  const s = fresh();
+  build(s, 'treads', 2);
+  const e = addEnemy(s, 4, 0, 200);   // inside the aura radius (7)
+  const spd0 = s.big.baseSpeed * (1 + G.legBonus(s).spd);
+  run(s, 2);
+  check('Treads grind nearby enemies (ram aura)', e.hp < 200, 'hp ' + e.hp.toFixed(0));
+  check('Treads add move speed', 0.10 * G.roomEffPower(s.rooms.treads) > 0 && G.systemActive(s, 'treads'));
 }
 
 /* ================= repair rig, crits, magnet (Big Guy richness) ================= */
@@ -466,7 +525,7 @@ function bootFullApp() {
     return el;
   }
 
-  const IDS = ['bigView', 'bigFx', 'littleView', 'littleWrap', 'littleCanvas', 'topbar', 'hpFill', 'hpLabel', 'xpFill',
+  const IDS = ['bigView', 'bigFx', 'bigLoadout', 'littleView', 'littleWrap', 'littleCanvas', 'topbar', 'hpFill', 'hpLabel', 'xpFill',
     'shieldPips', 'salvStat', 'lvlStat', 'timeStat', 'sideTag', 'sideName', 'muteBtn', 'miniInterior', 'miniArena',
     'miniArenaTitle', 'toasts', 'dmgVignette', 'throttleBanner', 'pickModal', 'pickCards', 'startOverlay', 'startBtn',
     'overOverlay', 'overStats', 'restartBtn', 'hintBox'];
@@ -476,6 +535,7 @@ function bootFullApp() {
       : id === 'miniInterior' ? fakeCanvas(252, 240)
       : id === 'miniArena' ? fakeCanvas(230, 230)
       : id === 'bigFx' ? fakeCanvas(1440, 900)
+      : id === 'bigLoadout' ? fakeCanvas(640, 60)
       : makeEl('div');
   }
 
@@ -517,11 +577,12 @@ function bootFullApp() {
   frames(600, { KeyW: true, KeyD: true });
   check('10s as Big Guy runs clean (5-room mech)', G.state.t > 9 && G.builtIds(G.state).length === 5);
 
-  // force a shrine mid-run: it grows a room, then the AI crew welds it onto a pad live
+  // force a shrine mid-run: it grants an instant level-up the AI crew resolves live
+  const lvl0 = G.state.level;
   G.state.shrine = { x: G.state.big.x, z: G.state.big.z, progress: 0.999 };
-  frames(60, { KeyW: false, KeyD: false });
-  check('Grown room is welded onto the hull during play (AI crew places it)',
-    G.state.rooms.head.built && G.state.rooms.head.rect && !G.state.pendingGraft);
+  frames(150, { KeyW: false, KeyD: false });
+  check('Shrine grants an instant level-up the AI resolves live', G.state.level > lvl0,
+    'lvl ' + lvl0 + '→' + G.state.level);
   frames(120);
   check('Renderers survive the growth', G.state.t > 12);
 
@@ -569,9 +630,28 @@ function bootFullApp() {
   frames(30);
   check('Full salvage bar opens the pick modal',
     G.state.levelUp.pending && !els.pickModal.classList.contains('hidden'));
+  const lvlBeforePick = G.state.level;
   els.pickCards.children[0].onclick();
-  frames(5);
-  check('Pick card applies', !G.state.levelUp.pending);
+  frames(3);
+  if (G.state.pendingGraft) {                        // a BUILD pick → the crew welds it onto a pad
+    const p0 = G.validGraftSlots(G.state)[0];
+    if (p0) G.submitIntent({ t: 'placeGraft', slot: p0.key });
+    frames(3);
+  }
+  check('Pick card applies (level resolved, nothing left pending)',
+    G.state.level > lvlBeforePick && !G.state.pendingGraft);
+
+  // regression: MEDBAY is not an airlock room — building it once froze the interior render
+  if (!G.state.rooms.medbay.built) {
+    G.state.levelUp.pending = true; G.state.levelUp.free = true;
+    G.state.levelUp.options = [{ id: 'build', room: 'medbay' }, { id: 'upgrade', room: 'armGun' }];
+    G.submitIntent({ t: 'pick', idx: 0 });
+    frames(2);
+    const pad = G.validGraftSlots(G.state)[0];
+    if (pad) G.submitIntent({ t: 'placeGraft', slot: pad.key });
+  }
+  frames(20);
+  check('Built MEDBAY renders without freezing the interior', G.state.rooms.medbay.built);
 
   key('Tab');
   frames(1200);

@@ -52,7 +52,7 @@ window.SIM = (function () {
         applyPick(s, it.idx);
         break;
       case 'placeGraft':
-        installGraft(s, it.slot);
+        placeGraft(s, it.slot);
         break;
     }
   }
@@ -107,61 +107,97 @@ window.SIM = (function () {
     g.task = g.path.length ? 'moving' : 'idle';
   }
 
-  /* ================= progression: salvage bar → pick ================= */
+  /* ================= progression: one XP economy, Build vs Upgrade ================= */
+  const PART_ICON = {
+    head: '🐲', coreOrbitals: '🪐', medbay: '➕', repair: '🔧', mortar: '💥',
+    zapper: '⚡', sawWing: '🪃', armGun2: '🔫', treads: '🛞',
+    armGun: '🔫', shields: '🛡', legs: '🦿',
+  };
+  function buildDesc(s, id) {
+    const r = s.rooms[id];
+    if (r.weapon && W[r.weapon]) return 'New weapon — ' + W[r.weapon].name + ' (' + W[r.weapon].source + '). Comes crewed.';
+    if (r.sys === 'medbay') return 'A medbay that heals your crew. Comes crewed.';
+    if (r.sys === 'repair') return "A rig that mends the mech's hull. Comes crewed.";
+    if (r.sys === 'head') return 'A head with a flame-breath weapon. Comes crewed.';
+    return 'A new ' + r.name + ' bolted onto the mech. Comes crewed.';
+  }
+  // three cards every level: BUILD a new part · UPGRADE an existing one · +1 GOBLIN
+  // (with a hull fallback only at the extremes — all built, or crew maxed)
   function makePickOptions(s) {
-    const pool = [
-      { id: 'hp', icon: '🛠', name: 'Reinforce Hull', desc: '+20 max HP, +20 HP now, +0.3 HP/s regen.' },
-    ];
-    if (s.reactor.pips < C.MAX_PIPS)
-      pool.push({ id: 'pip', icon: '⚡', name: '+1 Reactor Pip', desc: 'More total power — every pip is output.' });
-    if (s.goblins.length < C.MAX_GOBLINS)
-      pool.push({ id: 'goblin', icon: '👷', name: '+1 Goblin', desc: 'Another pair of green hands aboard.' });
-    if (s.critChance < 0.55)
-      pool.push({ id: 'crit', icon: '🎯', name: 'Targeting Array', desc: '+' + Math.round(C.CRIT_STEP * 100) + '% critical-hit chance (×' + C.CRIT_MULT + ' damage).' });
-    pool.push({ id: 'magnet', icon: '🧲', name: 'Scrap Magnet', desc: '+' + C.MAGNET_STEP + ' salvage pickup range — hoover the field.' });
-    const upgradable = G.builtIds(s).filter(id => s.rooms[id].sys !== 'reactor' && s.rooms[id].tier < 3);
-    for (let i = 0; i < 2 && upgradable.length; i++) {
-      const id = upgradable.splice((Math.random() * upgradable.length) | 0, 1)[0];
-      const r = s.rooms[id];
-      pool.push({
-        id: 'upg', room: id, icon: '▲', name: r.name + ' +1',
-        desc: '+1 capacity AND +1 reactor pip to run it.',
-      });
-    }
     const opts = [];
-    while (opts.length < 3 && pool.length) opts.push(pool.splice((Math.random() * pool.length) | 0, 1)[0]);
+    const unbuilt = G.EXPANSION_ORDER.filter(id => !s.rooms[id].built);
+    if (unbuilt.length) {
+      const id = unbuilt[(Math.random() * unbuilt.length) | 0];
+      opts.push({ id: 'build', room: id, icon: PART_ICON[id] || '🔩', name: 'BUILD ' + s.rooms[id].name, desc: buildDesc(s, id) });
+    }
+    const upgradable = G.builtIds(s).filter(id => s.rooms[id].sys !== 'reactor' && s.rooms[id].tier < 3);
+    if (upgradable.length) {
+      const id = upgradable[(Math.random() * upgradable.length) | 0];
+      const r = s.rooms[id];
+      opts.push({ id: 'upgrade', room: id, icon: '⬆', name: 'UPGRADE ' + r.name, desc: 'Advance to level ' + (r.tier + 1) + ' — stronger, plus the pip to run it.' });
+    }
+    if (s.goblins.length < C.MAX_GOBLINS)
+      opts.push({ id: 'crew', icon: '👷', name: '+1 GOBLIN', desc: 'Another pair of green hands to run your rooms.' });
+    while (opts.length < 3)
+      opts.push({ id: 'hull', icon: '🛠', name: 'REINFORCE HULL', desc: '+20 max HP, heal, +0.3 HP/s regen.' });
     return opts;
+  }
+
+  function addGoblin(s, preferRoom) {
+    if (s.goblins.length >= C.MAX_GOBLINS) return;
+    const bay = preferRoom && G.roomHasFreeSlot(s, preferRoom) ? preferRoom
+      : (s.rooms.medbay.built && G.roomHasFreeSlot(s, 'medbay') ? 'medbay'
+        : G.builtIds(s).find(id => G.roomHasFreeSlot(s, id)));
+    if (bay) s.goblins.push(G.makeGoblin(bay, G.firstFreeSlot(s, bay)));
+  }
+
+  // BUILD hands the part to the crew to weld on — the player (or AI) chooses the pad.
+  function placeGraft(s, slotKey) {
+    if (!s.pendingGraft) return;
+    const id = s.pendingGraft.room;
+    if (!installGraft(s, id, slotKey)) return;   // invalid pad — ignore, keep waiting
+    s.pendingGraft = null;                        // crew grows via the +GOBLIN card, not for free
+    G.toast(s, 'both', '⬢ ' + s.rooms[id].name + ' WELDED ON', 'good');
+    AUDIO.play('roomBuilt');
+  }
+
+  // one path into a level-up, whether earned by XP or granted by a shrine
+  function grantLevelUp(s, free) {
+    const lu = s.levelUp;
+    if (lu.pending || s.pendingGraft) return;   // finish placing a part before the next level
+    lu.pending = true;
+    lu.free = !!free;
+    lu.options = makePickOptions(s);
+    lu.throttle = C.THROTTLE;
+    lu.aiT = 1.6;
+    AUDIO.play('levelup');
+    G.toast(s, 'big', 'LEVEL UP — CREW IS CHOOSING', 'good');
   }
 
   function applyPick(s, idx) {
     const lu = s.levelUp;
     if (!lu.pending || !lu.options || !lu.options[idx]) return;
     const o = lu.options[idx];
-    if (o.id === 'pip') s.reactor.pips = Math.min(C.MAX_PIPS, s.reactor.pips + 1);
-    else if (o.id === 'crit') s.critChance = Math.min(0.6, s.critChance + C.CRIT_STEP);
-    else if (o.id === 'magnet') s.magnet += C.MAGNET_STEP;
-    else if (o.id === 'hp') { s.maxHp += 20; s.hp = Math.min(s.maxHp, s.hp + 20); s.regen += 0.3; }
-    else if (o.id === 'goblin') {
-      const bay = s.rooms.medbay.built && G.roomHasFreeSlot(s, 'medbay') ? 'medbay'
-        : G.builtIds(s).find(id => G.roomHasFreeSlot(s, id));
-      if (bay) s.goblins.push(G.makeGoblin(bay, G.firstFreeSlot(s, bay)));
+    if (o.id === 'build') s.pendingGraft = { room: o.room };   // crew welds it where they choose
+    else if (o.id === 'upgrade') s.rooms[o.room].tier++;
+    else if (o.id === 'crew') addGoblin(s);
+    else if (o.id === 'hull') { s.maxHp += 20; s.hp = Math.min(s.maxHp, s.hp + 20); s.regen += 0.3; }
+    // every level makes the mech tougher and gives a pip to allocate (runs the new/upgraded part)
+    s.maxHp += C.LEVEL_HP; s.hp = Math.min(s.maxHp, s.hp + C.LEVEL_HP);
+    s.reactor.pips = Math.min(C.MAX_PIPS, s.reactor.pips + 1);
+    if (!lu.free) {
+      s.salvage = Math.max(0, s.salvage - lu.need);
+      lu.need = Math.round(lu.need * C.PICK_GROW);
     }
-    else if (o.id === 'upg') {
-      s.rooms[o.room].tier++;
-      s.reactor.pips = Math.min(C.MAX_PIPS, s.reactor.pips + 1);
-    }
-    s.salvage = Math.max(0, s.salvage - lu.cost);
-    lu.need = Math.round(lu.need * C.PICK_GROW);
     s.level++;
-    lu.pending = false; lu.options = null;
-    G.toast(s, 'big', 'CREW CHOSE: ' + o.name.toUpperCase(), 'good');
+    lu.pending = false; lu.options = null; lu.free = false;
+    G.toast(s, 'big', 'LEVEL ' + s.level + ' — ' + o.name, 'good');
     AUDIO.play('pick');
   }
 
-  /* ================= shrines: channel to grow the mech ================= */
+  /* ================= shrines: stand in the ring for an INSTANT level-up ================= */
   function tickShrine(s, dt) {
-    // a grown-but-unplaced room blocks the next shrine — the crew must weld it on first
-    if (s.pendingGraft) return;
+    if (s.pendingGraft) return;   // weld the last part on before a shrine can grant another level
     if (!s.shrine) {
       s.shrineT -= dt;
       if (s.shrineT <= 0) {
@@ -171,8 +207,7 @@ window.SIM = (function () {
           x = Math.cos(a) * d; z = Math.sin(a) * d;
         } while (tries-- > 0 && Math.hypot(x - s.big.x, z - s.big.z) < 30);
         s.shrine = { x, z, progress: 0 };
-        const next = G.nextExpansion(s);
-        G.toast(s, 'both', '⬢ SHRINE RISEN — ' + (next ? 'a new room waits' : 'salvage waits'), 'good');
+        G.toast(s, 'both', '⬢ SHRINE RISEN — channel it for a free level', 'good');
         AUDIO.play('shrine');
       }
       return;
@@ -193,25 +228,14 @@ window.SIM = (function () {
   function completeShrine(s) {
     s.shrine = null;
     s.shrineT = C.SHRINE_EVERY;
-    const id = G.nextExpansion(s);
-    if (!id) {
-      s.salvage += C.SHRINE_SALVAGE;
-      G.toast(s, 'both', '⬢ SHRINE DRAINED: +' + C.SHRINE_SALVAGE + '⛭', 'good');
-      AUDIO.play('roomBuilt');
-      return;
-    }
-    // the room is grown, but it isn't part of the body until the crew welds it
-    // onto a pad whose doors line up (§ player-placed grafts).
-    s.pendingGraft = { room: id };
-    G.toast(s, 'both', '⬢ ' + s.rooms[id].name + ' GROWN — CREW: weld it onto the hull', 'good');
-    AUDIO.play('shrine');
+    grantLevelUp(s, true);   // a channeled shrine is a free, instant level-up
+    G.toast(s, 'both', '⬢ SHRINE CHANNELLED — INSTANT LEVEL UP', 'good');
+    AUDIO.play('roomBuilt');
   }
 
-  // install the pending graft onto a chosen pad: derive adjacency from geometry,
-  // link neighbors both ways, cut the doorways, then bring the room online.
-  function installGraft(s, slotKey) {
-    if (!s.pendingGraft) return false;
-    const id = s.pendingGraft.room;
+  // install a built part on a chosen pad: derive adjacency from geometry, link neighbors
+  // both ways, cut the doorways, then bring the room online.
+  function installGraft(s, id, slotKey) {
     const slot = G.GRAFT_SLOTS[slotKey];
     if (!slot) return false;
     if (!G.validGraftSlots(s).some(v => v.key === slotKey)) return false;
@@ -226,11 +250,8 @@ window.SIM = (function () {
     r.built = true;
     r.builtT = s.t;
     r.air = 1;
-    s.pendingGraft = null;
     s.stats.roomsGrown++;
     s.fx.push({ type: 'graft', age: 0 });
-    G.toast(s, 'both', '⬢ ' + r.name + ' WELDED ON', 'good');
-    AUDIO.play('roomBuilt');
     return true;
   }
 
@@ -244,12 +265,14 @@ window.SIM = (function () {
 
   function tickWeapons(s, dt) {
     tickArmGun(s, dt);
+    tickArmGun2(s, dt);
     tickCoreOrbitals(s, dt);
     tickFireTrail(s, dt);
     tickHeadFlame(s, dt);
     tickMortar(s, dt);
     tickZapper(s, dt);
     tickSawWing(s, dt);
+    tickTreads(s, dt);
     tickFallback(s, dt);
   }
 
@@ -303,6 +326,30 @@ window.SIM = (function () {
     w.cd = scaledCd(s, 'armGun');
     fireBolt(s, target, W.armGun.damage);
     s.fx.push({ type: 'muzzle', side: 'l', age: 0 });
+  }
+
+  // SECOND ARM: a twin bolter firing from the other side
+  function tickArmGun2(s, dt) {
+    const w = s.weapons.armGun2;
+    w.cd -= dt;
+    if (!G.weaponActive(s, 'armGun2') || w.cd > 0) return;
+    const target = nearestEnemy(s, W.armGun2.range);
+    if (!target) { w.cd = 0.05; return; }
+    w.cd = scaledCd(s, 'armGun2');
+    fireBolt(s, target, W.armGun2.damage);
+    s.fx.push({ type: 'muzzle', side: 'r', age: 0 });
+  }
+
+  // TREADS: a crushing contact aura around the mech (Garlic-style)
+  function tickTreads(s, dt) {
+    if (!G.weaponActive(s, 'treadRam')) return;
+    const def = W.treadRam;
+    const b = s.big, r2 = def.radius * def.radius;
+    const dps = def.damagePerSecond * G.pipEff(pipsOf(s, 'treads')) * (G.roomManned(s, 'treads') ? 1.3 : 1);
+    for (const e of s.enemies) {
+      const dx = e.x - b.x, dz = e.z - b.z;
+      if (dx * dx + dz * dz < r2) burnEnemy(s, e, dps * dt);
+    }
   }
 
   function tickFallback(s, dt) {
@@ -1009,7 +1056,9 @@ window.SIM = (function () {
   function tickBig(s, dt) {
     const b = s.big;
     const legs = G.legBonus(s);
-    const spd = b.baseSpeed * (1 + legs.spd);
+    let treadSpd = 0;
+    if (G.systemActive(s, 'treads')) treadSpd = 0.10 * G.roomEffPower(s.rooms.treads) + (G.roomManned(s, 'treads') ? 0.05 : 0);
+    const spd = b.baseSpeed * (1 + legs.spd + treadSpd);
     let mx = b.moveX, mz = b.moveZ;
     const ml = Math.hypot(mx, mz);
     if (ml > 1e-3) {
@@ -1105,16 +1154,8 @@ window.SIM = (function () {
 
     tickShrine(s, dt);
 
-    // salvage bar → pick moment
-    if (!s.levelUp.pending && s.salvage >= s.levelUp.need) {
-      s.levelUp.pending = true;
-      s.levelUp.cost = s.levelUp.need;
-      s.levelUp.options = makePickOptions(s);
-      s.levelUp.throttle = C.THROTTLE;
-      s.levelUp.aiT = 1.6;
-      AUDIO.play('levelup');
-      G.toast(s, 'big', 'SALVAGE BANKED — CREW IS CHOOSING', 'good');
-    }
+    // XP bar → level up
+    if (!s.levelUp.pending && !s.pendingGraft && s.salvage >= s.levelUp.need) grantLevelUp(s, false);
     if (s.levelUp.throttle > 0) s.levelUp.throttle -= dt;
   }
 

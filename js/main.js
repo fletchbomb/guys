@@ -84,6 +84,7 @@
     el('miniArena').classList.remove('hidden');
     el('miniArenaTitle').classList.remove('hidden');
     el('bigFx').classList.toggle('hidden', !big);
+    el('bigLoadout').classList.toggle('hidden', !big);
     if (document.body) document.body.classList.toggle('littleMode', !big);
     BIGR.setActive(big);
   }
